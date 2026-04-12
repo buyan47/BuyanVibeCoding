@@ -1,171 +1,204 @@
 """
 Amtrak Receipt Parser
 ──────────────────────
-Extracts structured data from Amtrak e-ticket / receipt PDFs (and HTML fallbacks).
+Parses Amtrak HTML sales-receipt emails (from etickets@amtrak.com).
+
+Real email structure observed:
+  Subject : SALES RECEIPT
+  From    : etickets@amtrak.com
+  Body contains (plain-text after HTML stripping):
+    "Reservation Number - D92DC4"
+    "Wilmington, DE to Washington, DC - Union Station (Round-Trip)"
+    "APRIL 7, 2026"                        ← purchase date
+    "Purchase Summary - Ticket Number 0970632534586"
+    "TRAIN 151: Wilmington, DE to Washington, DC - Union Station (Round-Trip)"
+    "Depart 5:24 AM, Wednesday, April 15, 2026"
+    "Total Charged by Amtrak  $212.00"
+    Passengers section: "Buyan Thyagarajan"
 
 Fields extracted:
-  - date          : travel date (YYYY-MM-DD)
-  - amount        : total charged (float)
-  - description   : route  e.g. "New York → Washington DC"
-  - ticket_number : Amtrak confirmation / ticket number
-  - passenger     : passenger name if present
-  - vendor        : always "Amtrak"
-  - source_file   : path of the parsed file
+  date           – first departure date  (YYYY-MM-DD)
+  purchase_date  – date email was sent / ticket purchased (YYYY-MM-DD)
+  amount         – Total Charged by Amtrak (float)
+  description    – route string, e.g. "Wilmington, DE → Washington, DC - Union Station"
+  reservation    – reservation / confirmation number  (e.g. D92DC4)
+  ticket_number  – ticket number (e.g. 0970632534586)
+  passenger      – passenger name (e.g. Buyan Thyagarajan)
+  vendor         – always "Amtrak"
+  source_file    – path of the parsed file
 """
 
 import re
 import os
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
-import pdfplumber
 from bs4 import BeautifulSoup
 
 
 class AmtrakParser:
-    """Parse a single Amtrak receipt file (PDF or HTML) into a structured dict."""
-
     VENDOR = "Amtrak"
 
     def parse(self, file_path: str) -> Dict:
-        ext = os.path.splitext(file_path)[1].lower()
-        if ext == ".pdf":
-            text = self._read_pdf(file_path)
-        elif ext in (".html", ".htm"):
-            text = self._read_html(file_path)
-        else:
-            # Try PDF first, fall back to plain text
-            try:
-                text = self._read_pdf(file_path)
-            except Exception:
-                with open(file_path, "r", errors="replace") as fh:
-                    text = fh.read()
-
+        text = self._read(file_path)
         return {
             "vendor":        self.VENDOR,
-            "date":          self._extract_date(text),
+            "date":          self._extract_departure_date(text),
+            "purchase_date": self._extract_purchase_date(text),
             "amount":        self._extract_amount(text),
             "description":   self._extract_description(text),
+            "reservation":   self._extract_reservation(text),
             "ticket_number": self._extract_ticket_number(text),
             "passenger":     self._extract_passenger(text),
             "source_file":   file_path,
         }
 
-    # ── Readers ───────────────────────────────────────────────────────────────
+    # ── Reader ────────────────────────────────────────────────────────────────
 
     @staticmethod
-    def _read_pdf(path: str) -> str:
-        pages = []
-        with pdfplumber.open(path) as pdf:
-            for page in pdf.pages:
-                pages.append(page.extract_text() or "")
-        return "\n".join(pages)
-
-    @staticmethod
-    def _read_html(path: str) -> str:
-        with open(path, "r", errors="replace") as fh:
-            soup = BeautifulSoup(fh.read(), "lxml")
-        return soup.get_text(separator="\n")
+    def _read(path: str) -> str:
+        ext = os.path.splitext(path)[1].lower()
+        if ext in (".html", ".htm", ".txt"):
+            with open(path, "r", errors="replace") as fh:
+                raw = fh.read()
+            if ext in (".html", ".htm") or raw.lstrip().startswith("<"):
+                return BeautifulSoup(raw, "lxml").get_text(separator="\n")
+            return raw
+        # Try PDF via pdfplumber
+        try:
+            import pdfplumber
+            pages = []
+            with pdfplumber.open(path) as pdf:
+                for page in pdf.pages:
+                    pages.append(page.extract_text() or "")
+            return "\n".join(pages)
+        except Exception:
+            with open(path, "r", errors="replace") as fh:
+                return fh.read()
 
     # ── Field extractors ──────────────────────────────────────────────────────
 
     @staticmethod
-    def _extract_date(text: str) -> Optional[str]:
+    def _extract_departure_date(text: str) -> Optional[str]:
         """
-        Amtrak PDFs usually show the travel date as:
-          'Departs  Mon, Jan 15, 2024'  or  '01/15/2024'
+        Find 'Depart HH:MM AM/PM, DayOfWeek, Month DD, YYYY'
+        e.g. 'Depart 5:24 AM, Wednesday, April 15, 2026'
+        Return the FIRST (earliest) departure date found.
         """
-        # Pattern 1: "Mon, Jan 15, 2024" or "January 15, 2024"
-        m = re.search(
-            r"(?:Departs?|Travel Date|Date)[:\s]+(?:\w+,\s+)?(\w+ \d{1,2},?\s+\d{4})",
+        matches = re.findall(
+            r"Depart\s+\d{1,2}:\d{2}\s+[AP]M,\s+\w+,\s+(\w+ \d{1,2},\s*\d{4})",
             text, re.IGNORECASE
         )
-        if m:
-            return _parse_loose_date(m.group(1))
+        if matches:
+            return _parse_date(matches[0])
 
-        # Pattern 2: MM/DD/YYYY or YYYY-MM-DD
-        m = re.search(r"\b(\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2})\b", text)
+        # Fallback: look for standalone date near "APRIL 7, 2026" style
+        m = re.search(r"\b(January|February|March|April|May|June|July|August|"
+                      r"September|October|November|December)\s+\d{1,2},\s*\d{4}\b",
+                      text, re.IGNORECASE)
         if m:
-            return _normalise_date(m.group(1))
+            return _parse_date(m.group(0))
+        return None
 
+    @staticmethod
+    def _extract_purchase_date(text: str) -> Optional[str]:
+        """
+        'Purchased: 04/07/2026 7:33 AM PT'
+        """
+        m = re.search(r"Purchased[:\s]+(\d{1,2}/\d{1,2}/\d{4})", text, re.IGNORECASE)
+        if m:
+            return _parse_date(m.group(1))
         return None
 
     @staticmethod
     def _extract_amount(text: str) -> Optional[float]:
         """
-        Look for 'Total  $123.45' or 'Amount Charged  $123.45'.
-        Returns the LAST (largest / final) dollar amount found after a total label.
+        'Total Charged by Amtrak  $212.00'
         """
-        # Prefer explicit total labels
-        for label in (
-            r"Total(?:\s+Charged)?",
-            r"Amount(?:\s+Due|\s+Charged)?",
-            r"Grand Total",
-        ):
-            m = re.search(label + r"\s*\$?\s*([\d,]+\.\d{2})", text, re.IGNORECASE)
-            if m:
-                return float(m.group(1).replace(",", ""))
+        m = re.search(r"Total\s+Charged\s+by\s+Amtrak\s*\$?\s*([\d,]+\.\d{2})",
+                      text, re.IGNORECASE)
+        if m:
+            return float(m.group(1).replace(",", ""))
 
-        # Fall back: last dollar amount in the document
+        # Fallback: 'Total  $212.00'
+        m = re.search(r"\bTotal\b\s*\$?\s*([\d,]+\.\d{2})", text, re.IGNORECASE)
+        if m:
+            return float(m.group(1).replace(",", ""))
+
+        # Last resort: last $ amount
         amounts = re.findall(r"\$\s*([\d,]+\.\d{2})", text)
         if amounts:
             return float(amounts[-1].replace(",", ""))
-
         return None
 
     @staticmethod
     def _extract_description(text: str) -> Optional[str]:
         """
-        Build a route string like 'New York Penn Station → Washington Union Station'.
-        Amtrak PDFs typically have 'From  New York Penn Station' / 'To  Washington'.
+        'Wilmington, DE to Washington, DC - Union Station (Round-Trip)'
+        This appears right after the Reservation Number line.
         """
-        origin = re.search(
-            r"(?:From|Origin|Departs?(?:\s+from)?)\s*[:\-]?\s*([A-Za-z ]+(?:Station|Terminal)?)",
+        # Pattern: "City, ST to City, ST ..." on its own line
+        m = re.search(
+            r"([A-Za-z ,\-]+,\s*[A-Z]{2}\s+to\s+[A-Za-z ,\-]+(?:Station|Terminal|Airport)?[^\n]*)",
             text, re.IGNORECASE
         )
-        destination = re.search(
-            r"(?:To|Dest(?:ination)?|Arrives?(?:\s+at)?)\s*[:\-]?\s*([A-Za-z ]+(?:Station|Terminal)?)",
-            text, re.IGNORECASE
-        )
-        if origin and destination:
-            return f"{origin.group(1).strip()} → {destination.group(1).strip()}"
+        if m:
+            desc = m.group(1).strip().rstrip(".")
+            # Normalise "X to Y" → "X → Y"
+            desc = re.sub(r"\s+to\s+", " → ", desc, count=1, flags=re.IGNORECASE)
+            return desc
 
-        # Alternative: train name line  "Acela Express 2151 - New York → Washington"
-        m = re.search(r"([\w ]+\d+\s*[-–]\s*[\w ]+(?:→|to)[\w ]+)", text, re.IGNORECASE)
+        # Fallback: TRAIN line
+        m = re.search(r"TRAIN\s+\d+[:\s]+(.+)", text, re.IGNORECASE)
         if m:
             return m.group(1).strip()
-
         return "Amtrak Trip"
 
     @staticmethod
-    def _extract_ticket_number(text: str) -> Optional[str]:
+    def _extract_reservation(text: str) -> Optional[str]:
+        """
+        'Reservation Number - D92DC4'
+        """
         m = re.search(
-            r"(?:Reservation|Confirmation|Ticket|eTicket)\s*(?:#|No\.?|Number)?\s*[:\-]?\s*([A-Z0-9]{4,12})",
+            r"Reservation\s+Number\s*[-–:]\s*([A-Z0-9]{4,12})",
+            text, re.IGNORECASE
+        )
+        return m.group(1).strip() if m else None
+
+    @staticmethod
+    def _extract_ticket_number(text: str) -> Optional[str]:
+        """
+        'Purchase Summary - Ticket Number 0970632534586'
+        """
+        m = re.search(
+            r"Ticket\s+Number\s*[-–:]?\s*(\d{6,20})",
             text, re.IGNORECASE
         )
         return m.group(1).strip() if m else None
 
     @staticmethod
     def _extract_passenger(text: str) -> Optional[str]:
+        """
+        The 'Passengers' section contains a box with the name.
+        Look for a proper-cased name (First Last) following the 'Passengers' header.
+        """
         m = re.search(
-            r"(?:Passenger|Traveler|Name)\s*[:\-]?\s*([A-Z][a-z]+ [A-Z][a-z]+)",
+            r"Passengers?\s*\n+\s*([A-Z][a-z]+ [A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+            text
+        )
+        if m:
+            return m.group(1).strip()
+
+        # Fallback: any proper-cased two-word name after "Passenger"
+        m = re.search(
+            r"Passenger[:\s]+([A-Z][a-z]+ [A-Z][a-z]+)",
             text
         )
         return m.group(1).strip() if m else None
 
 
-# ── Date helpers ──────────────────────────────────────────────────────────────
+# ── Date helper ───────────────────────────────────────────────────────────────
 
-def _parse_loose_date(s: str) -> Optional[str]:
-    """Parse 'January 15 2024' or 'Jan 15, 2024' → 'YYYY-MM-DD'."""
-    from dateutil import parser as dparser
-    try:
-        return dparser.parse(s).strftime("%Y-%m-%d")
-    except Exception:
-        return s.strip()
-
-
-def _normalise_date(s: str) -> Optional[str]:
-    """Convert MM/DD/YYYY or YYYY-MM-DD → YYYY-MM-DD."""
+def _parse_date(s: str) -> Optional[str]:
     from dateutil import parser as dparser
     try:
         return dparser.parse(s).strftime("%Y-%m-%d")

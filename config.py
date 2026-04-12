@@ -11,12 +11,14 @@ TOKEN_FILE       = "token.json"         # auto-created after first login
 DRIVE_FOLDER_NAME = "Travel Receipts"   # top-level folder in My Drive
 
 # ── Gmail search ─────────────────────────────────────────────────────────────
-# These queries are passed directly to the Gmail search API.
-# You can tighten them (e.g. add  from:receipts@amtrak.com) after testing.
+# Queries use actual sender addresses confirmed from real receipts.
+# Amtrak  : etickets@amtrak.com  – subject "SALES RECEIPT"
+# Marriott: PDF attachment emails from Marriott (folio / confirmation)
+# Uber    : noreply@uber.com     – subject contains "trip" or "tipping"
 GMAIL_QUERIES = {
-    "amtrak":   'subject:"Amtrak" (subject:"receipt" OR subject:"eticket" OR subject:"booking")',
-    "marriott": 'subject:"Marriott" (subject:"receipt" OR subject:"folio" OR subject:"confirmation")',
-    "uber":     'from:uber.com (subject:"receipt" OR subject:"Your trip")',
+    "amtrak":   'from:etickets@amtrak.com subject:"SALES RECEIPT"',
+    "marriott": '(from:marriott.com OR from:email.marriott.com) (subject:"receipt" OR subject:"folio" OR subject:"stay" OR subject:"confirmation")',
+    "uber":     'from:noreply@uber.com (subject:"trip" OR subject:"tipping" OR subject:"receipt")',
 }
 
 # ── Output files ─────────────────────────────────────────────────────────────

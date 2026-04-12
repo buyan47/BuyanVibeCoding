@@ -22,24 +22,30 @@ from openpyxl.utils import get_column_letter
 
 # Columns that appear in every sheet (in order)
 COMMON_COLUMNS = [
-    ("Vendor",       "vendor"),
-    ("Date",         "date"),
-    ("Amount ($)",   "amount"),
-    ("Description",  "description"),
+    ("Vendor",        "vendor"),
+    ("Date",          "date"),
+    ("Amount ($)",    "amount"),
+    ("Description",   "description"),
 ]
 
-# Extra columns per vendor
+# Extra columns per vendor (shown after common columns on vendor-specific sheets)
 VENDOR_EXTRA_COLUMNS = {
     "Amtrak": [
-        ("Ticket #",   "ticket_number"),
-        ("Passenger",  "passenger"),
+        ("Reservation #", "reservation"),
+        ("Ticket #",      "ticket_number"),
+        ("Passenger",     "passenger"),
+        ("Purchase Date", "purchase_date"),
     ],
     "Marriott": [
-        ("Check-Out",  "checkout_date"),
-        ("Nights",     "nights"),
-        ("Confirm #",  "confirmation"),
+        ("Check-Out",     "checkout_date"),
+        ("Nights",        "nights"),
+        ("Confirm #",     "confirmation"),
     ],
-    "Uber": [],
+    "Uber": [
+        ("Trip Fare",     "trip_fare"),
+        ("Tip",           "tip"),
+        ("Passenger",     "passenger"),
+    ],
 }
 
 # Header fill colours (hex, no #)

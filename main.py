@@ -25,7 +25,7 @@ import sys
 from auth          import get_credentials
 from gmail_scanner import GmailScanner
 from drive_uploader import DriveUploader
-from parsers        import AmtrakParser, MarriottParser
+from parsers        import AmtrakParser, MarriottParser, UberParser
 from excel_writer   import write_receipts
 from config         import OUTPUT_DIR
 
@@ -33,6 +33,7 @@ from config         import OUTPUT_DIR
 PARSERS = {
     "amtrak":   AmtrakParser(),
     "marriott": MarriottParser(),
+    "uber":     UberParser(),
 }
 
 
@@ -163,7 +164,7 @@ def _parse_args():
     )
     parser.add_argument("--start",       default="2024-01",    help="Start month YYYY-MM")
     parser.add_argument("--end",         default="2024-12",    help="End month   YYYY-MM")
-    parser.add_argument("--vendors",     nargs="+", default=["amtrak", "marriott"],
+    parser.add_argument("--vendors",     nargs="+", default=["amtrak", "marriott", "uber"],
                         help="Vendors to process (amtrak marriott uber)")
     parser.add_argument("--skip-drive",  action="store_true",  help="Skip Google Drive upload")
     parser.add_argument("--download-dir",default="downloads",  help="Local dir for raw files")
