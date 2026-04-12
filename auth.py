@@ -1,9 +1,10 @@
 """
 Google OAuth2 authentication helper.
-Handles the browser-based first-login flow and caches the token locally.
+Handles both local (browser) and server/headless (console) environments.
 """
 
 import os
+import sys
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -14,8 +15,10 @@ def get_credentials() -> Credentials:
     """
     Return valid Google credentials, refreshing or re-authorising as needed.
 
-    First run: opens a browser window for the user to grant access.
-    Subsequent runs: loads the cached token from TOKEN_FILE.
+    - If token.json exists and is valid: uses it silently.
+    - If expired but has refresh token: refreshes silently.
+    - First run (no token): prints an auth URL → you visit it in any browser →
+      paste the code back → token.json is saved for future runs.
     """
     creds = None
 
@@ -24,19 +27,45 @@ def get_credentials() -> Credentials:
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
+            print("[Auth] Refreshing expired token …")
             creds.refresh(Request())
         else:
             if not os.path.exists(CREDENTIALS_FILE):
-                raise FileNotFoundError(
-                    f"'{CREDENTIALS_FILE}' not found.\n"
-                    "Download it from Google Cloud Console:\n"
-                    "  APIs & Services → Credentials → OAuth 2.0 Client IDs → Download JSON\n"
-                    f"Then rename the file to '{CREDENTIALS_FILE}' and place it in this directory."
-                )
+                print("\n" + "="*60)
+                print("  credentials.json not found!")
+                print("="*60)
+                print("""
+Follow these steps to create it:
+
+1. Go to https://console.cloud.google.com/
+2. Create a new project (e.g. 'TravelReceipts')
+3. Enable APIs:
+     APIs & Services → Library → search 'Gmail API' → Enable
+     APIs & Services → Library → search 'Drive API' → Enable
+4. Create credentials:
+     APIs & Services → Credentials
+     → Create Credentials → OAuth 2.0 Client ID
+     → Application type: Desktop app
+     → Name: TravelReceipts → Create
+5. Download JSON → rename to 'credentials.json'
+6. Place it here:  """ + os.path.abspath(CREDENTIALS_FILE) + """
+
+Then re-run:  python3 main.py --start YYYY-MM --end YYYY-MM
+""")
+                sys.exit(1)
+
             flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
-            creds = flow.run_local_server(port=0)
+
+            # Try browser-based login first; fall back to console (copy-paste) flow
+            try:
+                creds = flow.run_local_server(port=0, open_browser=True)
+            except Exception:
+                print("\n[Auth] Browser not available — using console flow.")
+                print("[Auth] Visit the URL below, approve access, then paste the code here.\n")
+                creds = flow.run_console()
 
         with open(TOKEN_FILE, "w") as fh:
             fh.write(creds.to_json())
+        print("[Auth] token.json saved — future runs will skip this step.")
 
     return creds
