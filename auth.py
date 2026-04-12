@@ -56,16 +56,39 @@ Then re-run:  python3 main.py --start YYYY-MM --end YYYY-MM
 
             flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
 
-            # Try browser-based login first; fall back to console (copy-paste) flow
+            # Try local server first; fall back to manual copy-paste flow
             try:
                 creds = flow.run_local_server(port=0, open_browser=True)
             except Exception:
-                print("\n[Auth] Browser not available — using console flow.")
-                print("[Auth] Visit the URL below, approve access, then paste the code here.\n")
-                creds = flow.run_console()
+                creds = _run_console_flow(flow)
 
         with open(TOKEN_FILE, "w") as fh:
             fh.write(creds.to_json())
         print("[Auth] token.json saved — future runs will skip this step.")
 
     return creds
+
+
+def _run_console_flow(flow):
+    """
+    Manual OAuth flow for headless / server environments.
+    Prints the auth URL → user visits it in their browser → pastes the code back.
+    """
+    flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+    auth_url, _ = flow.authorization_url(
+        access_type="offline",
+        prompt="consent",
+    )
+
+    print("\n" + "=" * 60)
+    print("  Google Authorization Required")
+    print("=" * 60)
+    print("\n1. Open this URL in your browser:\n")
+    print("   " + auth_url)
+    print("\n2. Sign in and click Allow")
+    print("3. Copy the authorization code shown on the page")
+    print("4. Paste it below and press Enter\n")
+
+    code = input("Authorization code: ").strip()
+    flow.fetch_token(code=code)
+    return flow.credentials
