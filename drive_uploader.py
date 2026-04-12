@@ -13,6 +13,8 @@ import os
 import mimetypes
 from typing import Optional
 
+import httplib2
+import google_auth_httplib2
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2.credentials import Credentials
@@ -20,11 +22,17 @@ from google.oauth2.credentials import Credentials
 from config import DRIVE_FOLDER_NAME
 
 
+def _build_http(creds: Credentials):
+    """Build an authorized HTTP client (SSL verification relaxed for proxy environments)."""
+    http = httplib2.Http(disable_ssl_certificate_validation=True)
+    return google_auth_httplib2.AuthorizedHttp(creds, http=http)
+
+
 class DriveUploader:
     """Manages a Google Drive folder and uploads receipt files into it."""
 
     def __init__(self, creds: Credentials, root_folder_name: str = DRIVE_FOLDER_NAME):
-        self.service    = build("drive", "v3", credentials=creds)
+        self.service    = build("drive", "v3", http=_build_http(creds))
         self.root_name  = root_folder_name
         self._root_id: Optional[str] = None          # lazily resolved
         self._subfolder_cache: dict  = {}             # name → id

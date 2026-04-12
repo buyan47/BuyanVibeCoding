@@ -15,10 +15,18 @@ import os
 from datetime import datetime, date
 from typing import List, Dict, Optional
 
+import httplib2
+import google_auth_httplib2
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 
 from config import GMAIL_QUERIES
+
+
+def _build_http(creds: Credentials):
+    """Build an authorized HTTP client (SSL verification relaxed for proxy environments)."""
+    http = httplib2.Http(disable_ssl_certificate_validation=True)
+    return google_auth_httplib2.AuthorizedHttp(creds, http=http)
 
 
 class GmailScanner:
@@ -32,7 +40,7 @@ class GmailScanner:
     }
 
     def __init__(self, creds: Credentials):
-        self.service = build("gmail", "v1", credentials=creds)
+        self.service = build("gmail", "v1", http=_build_http(creds))
 
     # ── Public API ────────────────────────────────────────────────────────────
 
