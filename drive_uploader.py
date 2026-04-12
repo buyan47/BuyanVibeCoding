@@ -1,7 +1,15 @@
 """
 Google Drive Uploader
 ──────────────────────
-Creates (or reuses) a top-level folder in My Drive and uploads local files to it.
+Uploads receipt files into an existing Google Drive folder.
+
+Target structure:
+  My Drive > VibeCodingExperiments > TravelReceipts > Amtrak/
+                                                     > Marriott/
+                                                     > Uber/
+
+The root folder ID is read from config.DRIVE_FOLDER_ID (taken directly
+from the Drive URL) so no searching is needed.
 
 Usage:
     from drive_uploader import DriveUploader
@@ -19,7 +27,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2.credentials import Credentials
 
-from config import DRIVE_FOLDER_NAME
+from config import DRIVE_FOLDER_ID, DRIVE_FOLDER_NAME
 
 
 def _build_http(creds: Credentials):
@@ -29,28 +37,28 @@ def _build_http(creds: Credentials):
 
 
 class DriveUploader:
-    """Manages a Google Drive folder and uploads receipt files into it."""
+    """Uploads receipt files into VibeCodingExperiments/TravelReceipts on Google Drive."""
 
-    def __init__(self, creds: Credentials, root_folder_name: str = DRIVE_FOLDER_NAME):
-        self.service    = build("drive", "v3", http=_build_http(creds))
-        self.root_name  = root_folder_name
-        self._root_id: Optional[str] = None          # lazily resolved
-        self._subfolder_cache: dict  = {}             # name → id
+    def __init__(self, creds: Credentials):
+        self.service         = build("drive", "v3", http=_build_http(creds))
+        self._root_id        = DRIVE_FOLDER_ID          # pinned — no search needed
+        self._subfolder_cache: dict = {}                # vendor name → folder id
+        print(f"  [Drive] Root folder: {DRIVE_FOLDER_NAME}  (id={self._root_id})")
 
     # ── Public API ────────────────────────────────────────────────────────────
 
     def upload(self, local_path: str, subfolder: Optional[str] = None) -> str:
         """
         Upload *local_path* to Drive.
-        Places the file inside  <root_folder>/<subfolder>  (subfolder is optional).
+        Places the file inside TravelReceipts/<subfolder> (subfolder = vendor name).
         Returns the Drive file ID.
         """
-        parent_id = self._get_or_create_subfolder(subfolder) if subfolder else self._root_folder_id()
+        parent_id = self._get_or_create_subfolder(subfolder) if subfolder else self._root_id
 
         filename  = os.path.basename(local_path)
         mime_type = mimetypes.guess_type(local_path)[0] or "application/octet-stream"
 
-        # Avoid duplicates: check if the file already exists in the folder
+        # Skip if already uploaded
         existing_id = self._find_file(filename, parent_id)
         if existing_id:
             print(f"  [Drive] Already exists, skipping: {filename}")
@@ -71,7 +79,6 @@ class DriveUploader:
         """
         Upload a list of file-record dicts (as returned by GmailScanner).
         Adds a 'drive_file_id' key to each record.
-        Returns the updated list.
         """
         for rec in file_records:
             subfolder = rec.get(subfolder_key, "").capitalize()
@@ -80,47 +87,39 @@ class DriveUploader:
 
     # ── Private helpers ───────────────────────────────────────────────────────
 
-    def _root_folder_id(self) -> str:
-        if self._root_id is None:
-            self._root_id = self._get_or_create_folder(self.root_name, parent_id=None)
-        return self._root_id
-
     def _get_or_create_subfolder(self, name: str) -> str:
+        """Return (creating if needed) the ID of TravelReceipts/<name>."""
         if name not in self._subfolder_cache:
-            self._subfolder_cache[name] = self._get_or_create_folder(
-                name, parent_id=self._root_folder_id()
-            )
+            self._subfolder_cache[name] = self._get_or_create_folder(name, self._root_id)
         return self._subfolder_cache[name]
 
-    def _get_or_create_folder(self, name: str, parent_id: Optional[str]) -> str:
-        """Return the ID of an existing folder or create it."""
+    def _get_or_create_folder(self, name: str, parent_id: str) -> str:
         existing = self._find_folder(name, parent_id)
         if existing:
             return existing
 
-        metadata: dict = {
-            "name": name,
-            "mimeType": "application/vnd.google-apps.folder",
-        }
-        if parent_id:
-            metadata["parents"] = [parent_id]
-
         folder = (
             self.service.files()
-            .create(body=metadata, fields="id,name")
+            .create(
+                body={
+                    "name": name,
+                    "mimeType": "application/vnd.google-apps.folder",
+                    "parents": [parent_id],
+                },
+                fields="id,name",
+            )
             .execute()
         )
-        print(f"  [Drive] Created folder: {folder['name']}  (id={folder['id']})")
+        print(f"  [Drive] Created subfolder: {folder['name']}  (id={folder['id']})")
         return folder["id"]
 
-    def _find_folder(self, name: str, parent_id: Optional[str]) -> Optional[str]:
+    def _find_folder(self, name: str, parent_id: str) -> Optional[str]:
         query = (
             f"name='{name}' "
             f"and mimeType='application/vnd.google-apps.folder' "
+            f"and '{parent_id}' in parents "
             f"and trashed=false"
         )
-        if parent_id:
-            query += f" and '{parent_id}' in parents"
         return self._query_first(query)
 
     def _find_file(self, name: str, parent_id: str) -> Optional[str]:

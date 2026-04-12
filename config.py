@@ -8,7 +8,10 @@ CREDENTIALS_FILE = "credentials.json"   # OAuth 2.0 client secrets
 TOKEN_FILE       = "token.json"         # auto-created after first login
 
 # ── Google Drive ─────────────────────────────────────────────────────────────
-DRIVE_FOLDER_NAME = "Travel Receipts"   # top-level folder in My Drive
+# Folder: My Drive > VibeCodingExperiments > TravelReceipts
+# ID taken directly from the Drive URL — most reliable, no searching needed.
+DRIVE_FOLDER_ID   = "1dh4Va3pawmNb8ZBuaViEa_4-uhItLXl0"
+DRIVE_FOLDER_NAME = "TravelReceipts"    # used only for display / fallback
 
 # ── Gmail search ─────────────────────────────────────────────────────────────
 # Queries use actual sender addresses confirmed from real receipts.
