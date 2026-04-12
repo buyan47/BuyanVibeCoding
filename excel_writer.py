@@ -37,9 +37,13 @@ VENDOR_EXTRA_COLUMNS = {
         ("Purchase Date", "purchase_date"),
     ],
     "Marriott": [
-        ("Check-Out",     "checkout_date"),
-        ("Nights",        "nights"),
-        ("Confirm #",     "confirmation"),
+        ("Check-Out",       "checkout_date"),
+        ("Nights",          "nights"),
+        ("Guest #",         "guest_number"),
+        ("Room #",          "room_number"),
+        ("Bonvoy #",        "bonvoy_number"),
+        ("Guest Name",      "guest_name"),
+        ("Charges Detail",  "charge_summary"),
     ],
     "Uber": [
         ("Trip Fare",     "trip_fare"),
